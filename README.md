@@ -5,6 +5,7 @@ per-app volume and mute, and pick your system default output — all from a
 single bar widget. Inspired by
 [EarTrumpet](https://github.com/File-New-Project/EarTrumpet).
 
+![preview](preview.png)
 
 ## Features
 
