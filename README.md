@@ -5,7 +5,6 @@ per-app volume and mute, and pick your system default output — all from a
 single bar widget. Inspired by
 [EarTrumpet](https://github.com/File-New-Project/EarTrumpet).
 
-![preview](preview.png)
 
 ## Features
 
@@ -32,20 +31,20 @@ single bar widget. Inspired by
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/<you>/per-app-audio.git --enable
+omarchy plugin add https://github.com/raeganwyble/per-app-audio.git --enable
 ```
 
 Then move the widget to your bar's right section if it isn't there already:
 
 ```bash
-omarchy bar move <you>.per-app-audio --section right
+omarchy bar move raeganwyble.per-app-audio --section right
 ```
 
 Or add it manually to the `bar.layout.right` array in
 `~/.config/omarchy/shell.json`:
 
 ```json
-{ "id": "<you>.per-app-audio" }
+{ "id": "raeganwyble.per-app-audio" }
 ```
 
 ## Usage
@@ -77,7 +76,7 @@ Actions are the standard PipeWire/WirePlumber commands:
 ## Uninstall
 
 ```bash
-omarchy plugin remove <you>.per-app-audio
+omarchy plugin remove raeganwyble.per-app-audio
 ```
 
 ## License
