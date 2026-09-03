@@ -37,14 +37,14 @@ omarchy plugin add https://github.com/raeganwyble/per-app-audio.git --enable
 Then move the widget to your bar's right section if it isn't there already:
 
 ```bash
-omarchy bar move raeganwyble.per-app-audio --section right
+omarchy bar move io.github.raeganwyble.per-app-audio --section right
 ```
 
 Or add it manually to the `bar.layout.right` array in
 `~/.config/omarchy/shell.json`:
 
 ```json
-{ "id": "raeganwyble.per-app-audio" }
+{ "id": "io.github.raeganwyble.per-app-audio" }
 ```
 
 ## Usage
@@ -76,7 +76,7 @@ Actions are the standard PipeWire/WirePlumber commands:
 ## Uninstall
 
 ```bash
-omarchy plugin remove raeganwyble.per-app-audio
+omarchy plugin remove io.github.raeganwyble.per-app-audio
 ```
 
 ## License

@@ -11,8 +11,8 @@ import "Model.js" as Model
 // each one to a different output device, plus manage the default output.
 Panel {
   id: root
-  moduleName: "raeganwyble.per-app-audio"
-  ipcTarget: "raeganwyble.per-app-audio"
+  moduleName: "io.github.raeganwyble.per-app-audio"
+  ipcTarget: "io.github.raeganwyble.per-app-audio"
 
   property var displayStreams: []
   property var displaySinks: []
@@ -49,7 +49,7 @@ Panel {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string audioQueryPath: home
-    + "/.config/omarchy/plugins/raeganwyble.per-app-audio/query-audio.sh"
+    + "/.config/omarchy/plugins/io.github.raeganwyble.per-app-audio/query-audio.sh"
 
   Process {
     id: audioQueryProc
