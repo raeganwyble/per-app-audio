@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "raeganwyble.per-app-audio",
+  "name": "Per-App Audio",
+  "version": "1.0.0",
+  "author": "raeganwyble",
+  "description": "Per-application audio device routing, like EarTrumpet",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Per-App Audio",
+    "description": "Route individual apps to different audio devices",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
