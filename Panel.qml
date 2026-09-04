@@ -298,7 +298,6 @@ Panel {
     activeTab = tab
     focusSection = "header"
     selectedIndex = -1
-    cursorActive = false
   }
 
   function moveTab(delta) {
@@ -378,9 +377,10 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       onMoveRequested: function(dx, dy) {
-        if (!root.cursorActive) { root.cursorActive = true; return }
+        if (!root.cursorActive) root.cursorActive = true
         if (root.focusSection === "header") {
-          if (dx < 0) root.moveTab(-1)
+          if (dy !== 0) root.moveCursor(dy)
+          else if (dx < 0) root.moveTab(-1)
           else if (dx > 0) root.moveTab(1)
           return
         }
