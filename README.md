@@ -7,6 +7,16 @@ directions — all from a single bar widget. Inspired by
 
 ![preview](preview.png)
 
+The panel has three tabs — output, input, and a combined view of every app:
+
+| Output | Input |
+| :----: | :---: |
+| ![Output](preview.png) | ![Input](preview-input.png) |
+
+| Apps |
+| :--: |
+| ![Apps](preview-apps.png) |
+
 ## Features
 
 Three tabs keep output, input, and apps separate:
