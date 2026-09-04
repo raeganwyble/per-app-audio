@@ -6,10 +6,15 @@ function parseAudioData(raw) {
   try { data = JSON.parse(raw) } catch (e) { data = {} }
   var streams = Array.isArray(data.streams) ? data.streams : []
   var sinks = Array.isArray(data.sinks) ? data.sinks : []
+  var inputStreams = Array.isArray(data.inputStreams) ? data.inputStreams : []
+  var sources = Array.isArray(data.sources) ? data.sources : []
   return {
     streams: streams,
     sinks: sinks,
-    defaultSink: data.defaultSink || ""
+    defaultSink: data.defaultSink || "",
+    inputStreams: inputStreams,
+    sources: sources,
+    defaultSource: data.defaultSource || ""
   }
 }
 
@@ -85,6 +90,32 @@ function emptyState(streams) {
   return streams.length === 0
 }
 
+// ---- Input aliases (sources mirror sinks) ---------------------------------
+
+function sourceLabel(source) { return sinkLabel(source) }
+
+function currentSourceLabel(stream, sources) {
+  if (!stream) return ""
+  var name = stream.sourceName || ""
+  if (!name) return "Default"
+  for (var i = 0; i < sources.length; i++) {
+    if (sources[i].name === name) return sourceLabel(sources[i])
+  }
+  return shortSinkName(name)
+}
+
+function sourceDropdownOptions(sources, currentName) {
+  return dropdownOptions(sources, currentName)
+}
+
+function isDefaultSource(source, defaultSource) {
+  return isDefault(source, defaultSource)
+}
+
+function defaultSourceGlyph(source, defaultSource) {
+  return defaultGlyph(source, defaultSource)
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parseAudioData: parseAudioData,
@@ -98,6 +129,11 @@ if (typeof module !== "undefined") {
     dropdownOptions: dropdownOptions,
     isDefault: isDefault,
     defaultGlyph: defaultGlyph,
-    emptyState: emptyState
+    emptyState: emptyState,
+    sourceLabel: sourceLabel,
+    currentSourceLabel: currentSourceLabel,
+    sourceDropdownOptions: sourceDropdownOptions,
+    isDefaultSource: isDefaultSource,
+    defaultSourceGlyph: defaultSourceGlyph
   }
 }
