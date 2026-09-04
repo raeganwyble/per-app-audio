@@ -76,26 +76,26 @@ Panel {
 
   function setDefaultSink(sink) {
     if (!sink) return
-    bar.run("wpctl set-default '" + sink.index + "' 2>/dev/null; "
-      + "pactl set-default-sink '" + sink.name + "' 2>/dev/null")
+    Util.execArgv(["wpctl", "set-default", String(sink.index)])
+    Util.execArgv(["pactl", "set-default-sink", String(sink.name)])
     resyncTimer.restart()
   }
 
   function moveStream(stream, sinkName) {
     if (!stream || !sinkName) return
-    bar.run("pactl move-sink-input " + stream.index + " \"" + sinkName + "\"")
+    Util.execArgv(["pactl", "move-sink-input", String(stream.index), String(sinkName)])
     resyncTimer.restart()
   }
 
   function setStreamVolume(stream, volume) {
     if (!stream) return
     var pct = Math.round(Math.max(0, Math.min(1.5, volume)) * 100)
-    bar.run("pactl set-sink-input-volume " + stream.index + " " + pct + "%")
+    Util.execArgv(["pactl", "set-sink-input-volume", String(stream.index), pct + "%"])
   }
 
   function toggleStreamMute(stream) {
     if (!stream) return
-    bar.run("pactl set-sink-input-mute " + stream.index + " toggle")
+    Util.execArgv(["pactl", "set-sink-input-mute", String(stream.index), "toggle"])
     resyncTimer.restart()
   }
 
