@@ -41,9 +41,23 @@ Three tabs keep output, input, and apps separate:
 
 ## Requirements
 
-- Omarchy (Quickshell-based shell)
-- PipeWire / WirePlumber with the PulseAudio compatibility layer
-- `pactl`, `wpctl`, `pw-dump`, and `jq` on `PATH`
+- **Omarchy** (Quickshell-based shell).
+- **PipeWire / WirePlumber**. The friendly device names, default-device
+  detection, and (on minimal installs) the device listing come from `pw-dump`
+  and `wpctl`, both of which ship with PipeWire/WirePlumber.
+- **`jq` on `PATH`** (needed to assemble the JSON the panel renders).
+- **Full per-app routing** additionally requires the PulseAudio compatibility
+  layer and `pactl` (`libpulse`, `pipewire-pulse`). A stock Omarchy install
+  does **not** install these, so you may need to install them through your
+  package manager to get per-app routing/volume/mute.
+
+### Graceful degradation
+
+If `pactl`/`pipewire-pulse` are missing, the plugin still opens and shows every
+output/input device with correct friendly names and default-device switching,
+and displays a notice in the panel telling you exactly which tools are missing.
+The per-app stream list (Apps tab) needs `pactl`, so it stays empty until the
+compatibility layer is installed.
 
 ## Install
 

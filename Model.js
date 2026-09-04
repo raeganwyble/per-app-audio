@@ -14,7 +14,8 @@ function parseAudioData(raw) {
     defaultSink: data.defaultSink || "",
     inputStreams: inputStreams,
     sources: sources,
-    defaultSource: data.defaultSource || ""
+    defaultSource: data.defaultSource || "",
+    status: data.status || { ok: true, missing: [], message: "" }
   }
 }
 

@@ -22,6 +22,9 @@ Panel {
   property var displaySources: []
   property string defaultSourceName: ""
 
+  property bool requirementsOk: true
+  property string requirementsMessage: ""
+
   property string activeTab: "output"   // "output" | "input" | "apps"
   readonly property var tabs: ["output", "input", "apps"]
 
@@ -72,6 +75,8 @@ Panel {
         root.displaySources = parsed.sources
         root.displayInputStreams = parsed.inputStreams
         root.defaultSourceName = parsed.defaultSource
+        root.requirementsOk = parsed.status.ok
+        root.requirementsMessage = parsed.status.message || ""
       }
     }
     onExited: function(exitCode, exitStatus) {
@@ -82,6 +87,8 @@ Panel {
         root.displayInputStreams = []
         root.displaySources = []
         root.defaultSourceName = ""
+        root.requirementsOk = false
+        root.requirementsMessage = "query-audio.sh failed to run (exit " + exitCode + ")"
       }
     }
   }
@@ -528,6 +535,33 @@ Panel {
                   onClicked: root.switchTab(tabChip.modelData)
                 }
               }
+            }
+          }
+
+          // ---------- Requirements notice ----------
+          Rectangle {
+            visible: !root.requirementsOk
+            width: parent.width
+            radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(6)
+            color: Qt.rgba(0.85, 0.45, 0.25, 0.12)
+            border.color: Qt.rgba(0.85, 0.45, 0.25, 0.35)
+            border.width: 1
+            implicitHeight: reqText.implicitHeight + Style.space(18)
+
+            Text {
+              id: reqText
+              anchors.fill: parent
+              anchors.margins: Style.space(9)
+              textFormat: Text.PlainText
+              text: root.requirementsMessage !== ""
+                ? root.requirementsMessage
+                : "Missing required tools (see the package requirements)."
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              wrapMode: Text.WordWrap
+              verticalAlignment: Text.AlignVCenter
             }
           }
 
