@@ -31,6 +31,13 @@ Panel {
   property bool cursorActive: false
   property string focusSection: "devices"   // "devices" | "streams" | "header" | "inputdevices" | "instreams" | "apps"
   property int selectedIndex: -1
+
+  // While true, data refreshes are deferred. Sliding the volume knob sends
+  // mutations to the backend immediately but displays 1:1 mouse tracking, and
+  // the periodic re-query would otherwise rebuild the row (recreating its
+  // slider) mid-drag and yank the knob backward.
+  property bool volumeDragging: false
+  property var pendingData: null
   property var activePopoutDevice: null
   property bool hasStreams: displayStreams.length > 0
   property bool hasInputStreams: displayInputStreams.length > 0
@@ -50,12 +57,30 @@ Panel {
     id: refreshTimer
     interval: 2000
     repeat: true
-    running: root.opened
+    running: root.opened && !root.volumeDragging
     onTriggered: root.queryAudio()
   }
 
   function queryAudio() {
+    if (root.volumeDragging) {
+      resyncTimer.restart()
+      return
+    }
     if (!audioQueryProc.running) audioQueryProc.running = true
+  }
+
+  function applyPendingData() {
+    var parsed = root.pendingData
+    if (!parsed) return
+    root.pendingData = null
+    root.displaySinks = parsed.sinks
+    root.displayStreams = parsed.streams
+    root.defaultSinkName = parsed.defaultSink
+    root.displaySources = parsed.sources
+    root.displayInputStreams = parsed.inputStreams
+    root.defaultSourceName = parsed.defaultSource
+    root.requirementsOk = parsed.status.ok
+    root.requirementsMessage = parsed.status.message || ""
   }
 
   readonly property string home: Quickshell.env("HOME")
@@ -68,19 +93,13 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var parsed = Model.parseAudioData(text)
-        root.displaySinks = parsed.sinks
-        root.displayStreams = parsed.streams
-        root.defaultSinkName = parsed.defaultSink
-        root.displaySources = parsed.sources
-        root.displayInputStreams = parsed.inputStreams
-        root.defaultSourceName = parsed.defaultSource
-        root.requirementsOk = parsed.status.ok
-        root.requirementsMessage = parsed.status.message || ""
+        root.pendingData = Model.parseAudioData(text)
+        if (!root.volumeDragging) root.applyPendingData()
       }
     }
     onExited: function(exitCode, exitStatus) {
-      if (exitCode !== 0) {
+      if (exitCode !== 0 && !root.volumeDragging) {
+        root.pendingData = null
         root.displayStreams = []
         root.displaySinks = []
         root.defaultSinkName = ""
@@ -153,7 +172,7 @@ Panel {
   Timer {
     id: resyncTimer
     interval: 300
-    onTriggered: root.queryAudio()
+    onTriggered: if (!root.volumeDragging) root.queryAudio()
   }
 
   // ---- Keyboard cursor model --------------------------------------------
@@ -355,6 +374,7 @@ Panel {
       displaySinks = []
       displayInputStreams = []
       displaySources = []
+      pendingData = null
     }
   }
 
@@ -1007,8 +1027,14 @@ Panel {
         opacity: streamRow.streamMuted ? 0.5 : 1.0
 
         onMoved: function(v) {
+          root.volumeDragging = true
           streamRow.dragVolume = v
           root.setStreamVolume(streamRow.stream, v)
+        }
+        onReleased: function(v) {
+          root.volumeDragging = false
+          root.applyPendingData()
+          root.resyncTimer.restart()
         }
         onRightClicked: root.toggleStreamMute(streamRow.stream)
       }
@@ -1184,8 +1210,14 @@ Panel {
         opacity: instreamRow.streamMuted ? 0.5 : 1.0
 
         onMoved: function(v) {
+          root.volumeDragging = true
           instreamRow.dragVolume = v
           root.setInputStreamVolume(instreamRow.stream, v)
+        }
+        onReleased: function(v) {
+          root.volumeDragging = false
+          root.applyPendingData()
+          root.resyncTimer.restart()
         }
         onRightClicked: root.toggleInputStreamMute(instreamRow.stream)
       }
