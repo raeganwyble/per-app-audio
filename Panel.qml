@@ -112,6 +112,7 @@ Panel {
     if (!stream) return
     var pct = Math.round(Math.max(0, Math.min(1.5, volume)) * 100)
     Util.execArgv(["pactl", "set-sink-input-volume", String(stream.index), pct + "%"])
+    resyncTimer.restart()
   }
 
   function toggleStreamMute(stream) {
@@ -139,6 +140,7 @@ Panel {
     if (!stream) return
     var pct = Math.round(Math.max(0, Math.min(1.5, volume)) * 100)
     Util.execArgv(["pactl", "set-source-output-volume", String(stream.index), pct + "%"])
+    resyncTimer.restart()
   }
 
   function toggleInputStreamMute(stream) {
@@ -922,6 +924,10 @@ Panel {
     readonly property bool streamMuted: stream ? !!stream.muted : false
     readonly property string currentSink: stream ? (stream.sinkName || "") : ""
 
+    property real dragVolume: -1
+    readonly property real effectiveVolume: dragVolume >= 0 ? dragVolume : streamVolume
+    onStreamChanged: if (!volumeSlider.dragging) dragVolume = -1
+
     hasCursor: root.cursorActive && root.focusSection === streamRow.cursorSection && root.selectedIndex === rowIndex
     onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(streamRow)
     foreground: root.bar.foreground
@@ -977,7 +983,7 @@ Panel {
         Text {
           id: streamPct
           textFormat: Text.PlainText
-          text: Model.volumePercent(stream) + "%"
+          text: Math.round(Math.min(1.5, Math.max(0, streamRow.effectiveVolume)) * 100) + "%"
           color: Qt.darker(root.bar.foreground, 1.5)
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.caption
@@ -991,15 +997,19 @@ Panel {
 
       // Volume slider
       PanelSlider {
+        id: volumeSlider
         bar: root.bar
         width: parent.width
         minimum: 0
         maximum: 1.5
         step: 0.05
-        value: streamRow.streamVolume
+        value: streamRow.effectiveVolume
         opacity: streamRow.streamMuted ? 0.5 : 1.0
 
-        onMoved: function(v) { root.setStreamVolume(streamRow.stream, v) }
+        onMoved: function(v) {
+          streamRow.dragVolume = v
+          root.setStreamVolume(streamRow.stream, v)
+        }
         onRightClicked: root.toggleStreamMute(streamRow.stream)
       }
 
@@ -1091,6 +1101,10 @@ Panel {
     readonly property bool streamMuted: stream ? !!stream.muted : false
     readonly property string currentSource: stream ? (stream.sourceName || "") : ""
 
+    property real dragVolume: -1
+    readonly property real effectiveVolume: dragVolume >= 0 ? dragVolume : streamVolume
+    onStreamChanged: if (!instreamSlider.dragging) dragVolume = -1
+
     hasCursor: root.cursorActive && root.focusSection === instreamRow.cursorSection && root.selectedIndex === rowIndex
     onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(instreamRow)
     foreground: root.bar.foreground
@@ -1146,7 +1160,7 @@ Panel {
         Text {
           id: instreamPct
           textFormat: Text.PlainText
-          text: Model.volumePercent(stream) + "%"
+          text: Math.round(Math.min(1.5, Math.max(0, instreamRow.effectiveVolume)) * 100) + "%"
           color: Qt.darker(root.bar.foreground, 1.5)
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.caption
@@ -1160,15 +1174,19 @@ Panel {
 
       // Volume slider
       PanelSlider {
+        id: instreamSlider
         bar: root.bar
         width: parent.width
         minimum: 0
         maximum: 1.5
         step: 0.05
-        value: instreamRow.streamVolume
+        value: instreamRow.effectiveVolume
         opacity: instreamRow.streamMuted ? 0.5 : 1.0
 
-        onMoved: function(v) { root.setInputStreamVolume(instreamRow.stream, v) }
+        onMoved: function(v) {
+          instreamRow.dragVolume = v
+          root.setInputStreamVolume(instreamRow.stream, v)
+        }
         onRightClicked: root.toggleInputStreamMute(instreamRow.stream)
       }
 
