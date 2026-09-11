@@ -42,6 +42,10 @@ Panel {
   property bool hasStreams: displayStreams.length > 0
   property bool hasInputStreams: displayInputStreams.length > 0
 
+  // Device-route dropdowns open upward when the bar sits on the bottom edge,
+  // so the option list never extends past the bottom of the screen.
+  readonly property bool dropdownUp: panel ? panel.barPos === "bottom" : false
+
   readonly property color hoverFill: bar
     ? Style.hoverFillFor(bar.foreground, Color.accent)
     : Style.hoverFillFor(Color.foreground, Color.accent)
@@ -1040,13 +1044,14 @@ Panel {
       }
 
       // Device router
-      Dropdown {
+      FlipDropdown {
         width: parent.width
         label: "route to"
         value: streamRow.currentSink
         options: Model.dropdownOptions(root.displaySinks, streamRow.currentSink)
         foreground: root.bar.foreground
         fontFamily: root.bar.fontFamily
+        openUp: root.dropdownUp
 
         onChanged: function(value) {
           root.moveStream(streamRow.stream, value)
@@ -1236,12 +1241,13 @@ Panel {
           anchors.verticalCenter: parent.verticalCenter
         }
 
-        Dropdown {
+        FlipDropdown {
           width: parent.width - Style.space(78) - Style.space(8)
           value: instreamRow.currentSource
           options: Model.sourceDropdownOptions(root.displaySources, instreamRow.currentSource)
           foreground: root.bar.foreground
           fontFamily: root.bar.fontFamily
+          openUp: root.dropdownUp
 
           onChanged: function(value) {
             root.moveInputStream(instreamRow.stream, value)
