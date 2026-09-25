@@ -33,6 +33,85 @@ if [[ -z "$jq_path" || ( "${#missing[@]}" -gt 0 && -z "$pactl_path" && -z "$pwdu
   exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# Producer-side bounds. PipeWire/Pulse object graphs are attacker-influenced
+# (any local audio client can register arbitrarily many objects or use very
+# long names), and this script used to forward the *complete* graph to the
+# panel every poll. These caps bound object count, individual string length,
+# per-capture bytes, and final payload bytes, and **fail closed**: any capture
+# that exceeds a cap or isn't a valid JSON array of objects aborts the whole
+# query with a small error response instead of forwarding the oversized data.
+readonly MAX_OBJECTS=1024        # max objects in any single list
+readonly MAX_FIELD_LEN=512       # max bytes/length of any single string value
+readonly MAX_RAW_BYTES=1048576   # max bytes of any single raw capture (1 MiB)
+readonly MAX_TOTAL_BYTES=8388608 # max bytes of the final serialized payload
+
+cap_flag=0 # set to 1 by capture_bounded when a byte cap was hit
+
+# usage: capture_bounded <var> <byte_cap> <cmd...>
+# Sets <var> (global) to stdout of <cmd...>, truncated at <byte_cap>. When the
+# output reaches the cap, <var> is left empty and cap_flag is set to 1.
+capture_bounded() {
+  local out
+  out="$("${@:3}" 2>/dev/null | head -c "$2" || true)"
+  if (( ${#out} >= $2 )); then
+    cap_flag=1
+    eval "$1=''"
+  else
+    cap_flag=0
+    eval "$1=\$out"
+  fi
+}
+
+# usage: list_valid <json>; exit 0 when <json> is a JSON array of objects whose
+# length is within MAX_OBJECTS and whose string values are within MAX_FIELD_LEN.
+list_valid() {
+  [[ -n "$1" ]] || return 1
+  jq -e --argjson m "$MAX_FIELD_LEN" --argjson n "$MAX_OBJECTS" '
+    type == "array" and
+    (length <= $n) and
+    all(.[]; type == "object") and
+    ([.. | strings | length] | max // 0) <= $m
+  ' >/dev/null 2>&1 <<< "$1"
+}
+
+# usage: bounded_error <reason>; emits a small fail-closed response and exits 0
+# (so the panel surfaces the message instead of parsing garbage).
+bounded_error() {
+  jq -n --arg msg "query-audio.sh refused to forward oversized audio data: $1" \
+    '{status: {ok: false, missing: [], message: $msg}, streams: [], sinks: [], defaultSink: "", inputStreams: [], sources: [], defaultSource: ""}'
+}
+
+# usage: validate_capture <label> <json>; fails closed unless the preceding
+# capture stayed under its byte cap and parsed as a valid in-bounds list.
+validate_capture() {
+  if (( cap_flag )); then
+    bounded_error "binary capture of \"$1\" hit its byte cap"
+    exit 0
+  fi
+  if ! list_valid "$2"; then
+    bounded_error "\"$1\" exceeded MAX_OBJECTS/MAX_FIELD_LEN or was not a JSON array of objects"
+    exit 0
+  fi
+}
+
+# Bounded snapshot of the PipeWire registry, captured once and reused for the
+# friendly-name map and (when pactl is absent) the device-only fallback. A
+# missing pw-dump is fine when pactl is present (friendly names stay empty).
+if [[ -n "$pwdump_path" ]]; then
+  capture_bounded pw_raw "$MAX_RAW_BYTES" pw-dump
+  validate_capture "pw-dump registry" "$pw_raw"
+else
+  pw_raw="[]"
+fi
+
+# Friendly names from PipeWire (node.name -> node.description) for both Sinks
+# and Sources. These are the human-readable names shown by the regular volume
+# control; pactl's own "description" for RODE/ALSA devices is often the raw
+# profile name instead. Derived from the bounded pw_raw snapshot, so it is
+# bounded too.
+pw_desc="$(printf '%s' "$pw_raw" | jq '[.[] | select(.info.props["media.class"]=="Audio/Sink" or .info.props["media.class"]=="Audio/Source") | {key: .info.props["node.name"], value: (.info.props["node.description"] // "")}] | from_entries')"
+
 # Snapshot the PulseAudio graph once so streams and sinks agree. When pactl is
 # absent (minimal installs) we skip the pactl pulls and instead synthesize the
 # same arrays from pw-dump/wpctl below, producing a device-only view.
@@ -43,32 +122,44 @@ source_outputs_json=""
 sources_json=""
 default_source=""
 if [[ -n "$pactl_path" ]]; then
-  sink_inputs_json="$(pactl -fjson list sink-inputs 2>/dev/null || true)"
-  sinks_json="$(pactl -fjson list sinks 2>/dev/null || true)"
-  default_sink="$(pactl get-default-sink 2>/dev/null || true)"
+  capture_bounded sink_inputs_json "$MAX_RAW_BYTES" pactl -fjson list sink-inputs
+  validate_capture "sink-inputs" "$sink_inputs_json"
+  capture_bounded sinks_json "$MAX_RAW_BYTES" pactl -fjson list sinks
+  validate_capture "sinks" "$sinks_json"
+  capture_bounded default_sink "$MAX_FIELD_LEN" pactl get-default-sink
+  if (( cap_flag )); then
+    bounded_error "default sink name exceeded MAX_FIELD_LEN"
+    exit 0
+  fi
 
   # Input graph snapshot (recording streams + input devices) taken together.
-  source_outputs_json="$(pactl -fjson list source-outputs 2>/dev/null || true)"
-  sources_json="$(pactl -fjson list sources 2>/dev/null || true)"
-  default_source="$(pactl get-default-source 2>/dev/null || true)"
+  capture_bounded source_outputs_json "$MAX_RAW_BYTES" pactl -fjson list source-outputs
+  validate_capture "source-outputs" "$source_outputs_json"
+  capture_bounded sources_json "$MAX_RAW_BYTES" pactl -fjson list sources
+  validate_capture "sources" "$sources_json"
+  capture_bounded default_source "$MAX_FIELD_LEN" pactl get-default-source
+  if (( cap_flag )); then
+    bounded_error "default source name exceeded MAX_FIELD_LEN"
+    exit 0
+  fi
 else
-  # Device-only fallback (no pactl): build sink/source arrays from pw-dump in
-  # the same shape pactl would have produced, and read the current default
-  # endpoint from PipeWire's "default" metadata object. Per-app streams are left
-  # empty because listing/moving them requires the PulseAudio compatibility
-  # layer.
-  defaults="$(pw-dump 2>/dev/null | jq -c '[.[] | select(.type=="PipeWire:Interface:Metadata") | select(.props["metadata.name"]=="default") | .metadata[] | select(.key | startswith("default.audio.")) | {key, value}]')"
+  # Device-only fallback (no pactl): build sink/source arrays from the bounded
+  # pw_raw snapshot in the same shape pactl would have produced, and read the
+  # current default endpoint from PipeWire's "default" metadata object.
+  # Per-app streams are left empty because listing/moving them requires the
+  # PulseAudio compatibility layer.
+  defaults="$(printf '%s' "$pw_raw" | jq -c '[.[] | select(.type=="PipeWire:Interface:Metadata") | select(.props["metadata.name"]=="default") | .metadata[] | select(.key | startswith("default.audio.")) | {key, value}]')"
   default_sink="$(printf '%s' "$defaults" | jq -r '.[] | select(.key=="default.audio.sink") | .value.name // ""' 2>/dev/null || true)"
   default_source="$(printf '%s' "$defaults" | jq -r '.[] | select(.key=="default.audio.source") | .value.name // ""' 2>/dev/null || true)"
 
-  sinks_json="$(pw-dump 2>/dev/null | jq -c '[.[] |
+  sinks_json="$(printf '%s' "$pw_raw" | jq -c '[.[] |
     select(.type=="PipeWire:Interface:Node") |
     select((.info.props["media.class"] // "")=="Audio/Sink") |
     {index: (.info.props["object.id"] // -1),
      name: (.info.props["node.name"] // ""),
      description: (.info.props["node.description"] // .info.props["node.name"] // ""),
      default: false}]')"
-  sources_json="$(pw-dump 2>/dev/null | jq -c '[.[] |
+  sources_json="$(printf '%s' "$pw_raw" | jq -c '[.[] |
     select(.type=="PipeWire:Interface:Node") |
     select((.info.props["media.class"] // "")=="Audio/Source") |
     {index: (.info.props["object.id"] // -1),
@@ -83,12 +174,6 @@ else
     sources_json="$(printf '%s' "$sources_json" | jq -c --arg d "$default_source" 'map(.default = (.name == $d))')"
   fi
 fi
-
-# Friendly names from PipeWire (node.name -> node.description) for both Sinks
-# and Sources. These are the human-readable names shown by the regular volume
-# control; pactl's own "description" for RODE/ALSA devices is often the raw
-# profile name instead.
-pw_desc="$(pw-dump 2>/dev/null | jq '[.[] | select(.info.props["media.class"]=="Audio/Sink" or .info.props["media.class"]=="Audio/Source") | {key: .info.props["node.name"], value: (.info.props["node.description"] // "")}] | from_entries')"
 
 # Full name->description map (every sink, even non-selectable ones) so a
 # stream's current routing can always be labelled.
@@ -195,7 +280,7 @@ else
     '{ok: false, missing: $missing, message: $msg}')"
 fi
 
-jq -n \
+final_payload="$(jq -n \
   --argjson streams "$streams" \
   --argjson sinks "$sinks_out" \
   --arg defaultSink "$default_sink" \
@@ -203,4 +288,12 @@ jq -n \
   --argjson sources "$sources_out" \
   --arg defaultSource "$default_source" \
   --argjson status "$status_json" \
-  '{streams: $streams, sinks: $sinks, defaultSink: $defaultSink, inputStreams: $inputStreams, sources: $sources, defaultSource: $defaultSource, status: $status}'
+  '{streams: $streams, sinks: $sinks, defaultSink: $defaultSink, inputStreams: $inputStreams, sources: $sources, defaultSource: $defaultSource, status: $status}')"
+
+# Fail closed if serialization still exceeds the payload cap.
+if (( ${#final_payload} > MAX_TOTAL_BYTES )); then
+  bounded_error "final payload exceeded MAX_TOTAL_BYTES"
+  exit 0
+fi
+
+printf '%s\n' "$final_payload"

@@ -46,6 +46,10 @@ Panel {
   // so the option list never extends past the bottom of the screen.
   readonly property bool dropdownUp: panel ? panel.barPos === "bottom" : false
 
+  // Ceiling on bytes accepted from query-audio.sh in a single poll (the helper
+  // caps its own output; this is defense-in-depth and matches MAX_TOTAL_BYTES).
+  readonly property int maxAudioPayloadBytes: 8388608
+
   readonly property color hoverFill: bar
     ? Style.hoverFillFor(bar.foreground, Color.accent)
     : Style.hoverFillFor(Color.foreground, Color.accent)
@@ -97,6 +101,20 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        // Defense-in-depth: the helper already caps its own payload, but if
+        // oversized data still arrives, fail closed instead of buffering it.
+        if (text.length > root.maxAudioPayloadBytes) {
+          root.pendingData = null
+          root.displayStreams = []
+          root.displaySinks = []
+          root.defaultSinkName = ""
+          root.displayInputStreams = []
+          root.displaySources = []
+          root.defaultSourceName = ""
+          root.requirementsOk = false
+          root.requirementsMessage = "Audio query payload exceeded the size limit"
+          return
+        }
         root.pendingData = Model.parseAudioData(text)
         if (!root.volumeDragging) root.applyPendingData()
       }
