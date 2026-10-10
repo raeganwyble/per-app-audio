@@ -50,6 +50,12 @@ Panel {
   // caps its own output; this is defense-in-depth and matches MAX_TOTAL_BYTES).
   readonly property int maxAudioPayloadBytes: 8388608
 
+  // Persistent per-app routing rules (appKey -> sinkName), loaded from the
+  // query payload each poll and enforced by applyRoutingRules().
+  property var routingRules: ({})
+  property var lastRuleMove: ({})
+  readonly property int ruleMoveCooldownMs: 3500
+
   readonly property color hoverFill: bar
     ? Style.hoverFillFor(bar.foreground, Color.accent)
     : Style.hoverFillFor(Color.foreground, Color.accent)
@@ -81,6 +87,7 @@ Panel {
     var parsed = root.pendingData
     if (!parsed) return
     root.pendingData = null
+    root.routingRules = parsed.rules || {}
     root.displaySinks = parsed.sinks
     root.displayStreams = parsed.streams
     root.defaultSinkName = parsed.defaultSink
@@ -89,6 +96,7 @@ Panel {
     root.defaultSourceName = parsed.defaultSource
     root.requirementsOk = parsed.status.ok
     root.requirementsMessage = parsed.status.message || ""
+    root.applyRoutingRules()
   }
 
   readonly property string home: Quickshell.env("HOME")
@@ -160,6 +168,88 @@ Panel {
     if (!stream) return
     Util.execArgv(["pactl", "set-sink-input-mute", String(stream.index), "toggle"])
     resyncTimer.restart()
+  }
+
+  // ---- Persistent routing rules (app -> device) ---------------------------
+
+  function routingRuleKeyFor(stream) {
+    return Model.appKey(stream)
+  }
+
+  // Resolve a stream's current sink by its pactl node name (stream.sinkName is
+  // a friendly *description*, which pactl/move-sink-input cannot consume).
+  function streamSinkName(stream) {
+    if (!stream) return ""
+    var sinks = root.displaySinks
+    if (Array.isArray(sinks)) {
+      for (var i = 0; i < sinks.length; i++) {
+        if (sinks[i].index === stream.sink) return String(sinks[i].name || "")
+      }
+    }
+    return ""
+  }
+
+  function ruleSinkFor(appKey) {
+    if (!appKey || !root.routingRules) return ""
+    if (!Object.prototype.hasOwnProperty.call(root.routingRules, appKey)) return ""
+    var sink = root.routingRules[appKey]
+    return (typeof sink === "string" && sink !== "") ? sink : ""
+  }
+
+  function hasRoutingRule(appKey) {
+    return appKey !== "" && root.ruleSinkFor(appKey) !== ""
+  }
+
+  function setRoutingRule(appKey, sinkName) {
+    if (!appKey || !sinkName) return
+    Util.execArgv([root.audioQueryPath, "--set-rule", appKey, sinkName])
+    resyncTimer.restart()
+  }
+
+  function clearRoutingRule(appKey) {
+    if (!appKey) return
+    Util.execArgv([root.audioQueryPath, "--clear-rule", appKey])
+    resyncTimer.restart()
+  }
+
+  function toggleRoutingRule(appKey, sinkName) {
+    if (root.hasRoutingRule(appKey)) root.clearRoutingRule(appKey)
+    else root.setRoutingRule(appKey, sinkName)
+  }
+
+  function pinOpacity(stream) {
+    return root.hasRoutingRule(root.routingRuleKeyFor(stream)) ? 1.0 : 0.35
+  }
+
+  function pinColor(stream) {
+    return root.hasRoutingRule(root.routingRuleKeyFor(stream)) ? Color.accent : root.bar.foreground
+  }
+
+  // Move every active stream onto the sink its app rule dictates, unless it
+  // already is, the target device went away, or the stream was moved recently
+  // (cooldown prevents pactl churn while a target briefly drops).
+  function applyRoutingRules() {
+    if (root.volumeDragging) return
+    var streams = root.displayStreams
+    var sinks = root.displaySinks
+    if (!Array.isArray(streams) || !Array.isArray(sinks)) return
+    var now = Date.now()
+    for (var i = 0; i < streams.length; i++) {
+      var s = streams[i]
+      var key = Model.appKey(s)
+      var rule = root.ruleSinkFor(key)
+      if (rule === "" || root.streamSinkName(s) === rule) continue
+      var targetExists = false
+      for (var j = 0; j < sinks.length; j++) {
+        if (sinks[j].name === rule) { targetExists = true; break }
+      }
+      if (!targetExists) continue
+      var idxKey = String(s.index)
+      var last = root.lastRuleMove[idxKey]
+      if (last !== undefined && (now - last) < root.ruleMoveCooldownMs) continue
+      root.lastRuleMove[idxKey] = now
+      Util.execArgv(["pactl", "move-sink-input", idxKey, rule])
+    }
   }
 
   // ---- Input actions -----------------------------------------------------
@@ -1018,8 +1108,33 @@ Panel {
           font.pixelSize: Style.font.body
           font.bold: true
           elide: Text.ElideRight
-          width: parent.width - streamMuteIcon.width - streamPct.width - Style.space(16)
+          width: parent.width - streamMuteIcon.width - streamPin.width - streamPct.width - Style.space(16)
           anchors.verticalCenter: parent.verticalCenter
+        }
+
+        // Pin: remember the current device for this app (persistent rule).
+        Text {
+          id: streamPin
+          textFormat: Text.PlainText
+          text: "\uf08d"
+          color: root.pinColor(stream)
+          font.family: root.bar.fontFamily
+          font.pixelSize: Style.font.body
+          width: Style.space(20)
+          horizontalAlignment: Text.AlignHCenter
+          anchors.verticalCenter: parent.verticalCenter
+          opacity: root.pinOpacity(stream)
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            hoverEnabled: true
+            onClicked: {
+              var key = root.routingRuleKeyFor(stream)
+              if (key === "") return
+              root.toggleRoutingRule(key, root.streamSinkName(stream))
+            }
+          }
         }
 
         Text {

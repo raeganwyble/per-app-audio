@@ -46,6 +46,11 @@ readonly MAX_FIELD_LEN=512       # max bytes/length of any single string value
 readonly MAX_RAW_BYTES=1048576   # max bytes of any single raw capture (1 MiB)
 readonly MAX_TOTAL_BYTES=8388608 # max bytes of the final serialized payload
 
+# Persistent per-app routing rules: {"rules": {"<appKey>": "<sinkName>"}}.
+# Stored under the plugin's own XDG config dir so plugin updates never wipe rules.
+rules_src="${XDG_CONFIG_HOME:-$HOME/.config}/io.github.raeganwyble.per-app-audio"
+RULES_FILE="$rules_src/rules.json"
+
 cap_flag=0 # set to 1 by capture_bounded when a byte cap was hit
 
 # usage: capture_bounded <var> <byte_cap> <cmd...>
@@ -94,6 +99,65 @@ validate_capture() {
     exit 0
   fi
 }
+
+# Load persistent routing rules. Sets the global rules_json to a bounded,
+# normalized object: string-keyed, string-valued, within MAX_OBJECTS/MAX_FIELD_LEN.
+# Absent/corrupt content degrades to an empty rule set instead of failing the query.
+load_rules() {
+  if [[ -f "$RULES_FILE" ]]; then
+    rules_json="$(jq -e -c '.rules' "$RULES_FILE" 2>/dev/null || echo '{}')"
+  else
+    rules_json="{}"
+  fi
+  rules_json="$(printf '%s' "$rules_json" | jq -c --argjson n "$MAX_OBJECTS" --argjson m "$MAX_FIELD_LEN" '
+    if type != "object" then {}
+    else to_entries
+      | map(select((.key | length) <= $m))
+      | map(select((.value | type) == "string"))
+      | map(select((.value | length) <= $m))
+      | .[0:$n]
+      | from_entries
+    end')"
+}
+
+# Save the current rules_json atomically (tmp + rename) with an updatedAt stamp.
+save_rules() {
+  local dir ts payload tmp
+  dir="$(dirname "$RULES_FILE")"
+  mkdir -p "$dir" || return 1
+  ts="$(date -Is 2>/dev/null || date +%s)"
+  payload="$(jq -n --argjson rules "$rules_json" --arg ts "$ts" '{updatedAt: $ts, rules: $rules}')"
+  tmp="$dir/.rules.json.tmp"
+  printf '%s\n' "$payload" > "$tmp" 2>/dev/null || return 1
+  mv -f "$tmp" "$RULES_FILE"
+}
+
+# Fast path for rule maintenance invoked from the panel. No full graph capture.
+rule_op="${1:-}"
+if [[ "$rule_op" == "--set-rule" || "$rule_op" == "--clear-rule" ]]; then
+  rule_key="${2:-}"
+  rule_value="${3:-}"
+  if [[ -z "$rule_key" || ( "$rule_op" == "--set-rule" && -z "$rule_value" ) ]]; then
+    jq -n '{status: {ok: false, missing: [], message: "usage: query-audio.sh --set-rule <appKey> <sinkName> | --clear-rule <appKey>"}}'
+    exit 0
+  fi
+  if (( ${#rule_key} > MAX_FIELD_LEN || ${#rule_value} > MAX_FIELD_LEN )); then
+    bounded_error "rule key/value exceeded MAX_FIELD_LEN"
+    exit 0
+  fi
+  load_rules
+  if [[ "$rule_op" == "--set-rule" ]]; then
+    rules_json="$(printf '%s' "$rules_json" | jq -c --arg k "$rule_key" --arg v "$rule_value" '.[$k] = $v')"
+  else
+    rules_json="$(printf '%s' "$rules_json" | jq -c --arg k "$rule_key" 'del(.[$k])')"
+  fi
+  if save_rules; then
+    jq -n --arg op "$rule_op" --arg k "$rule_key" '{status: {ok: true, missing: [], message: ("routing rule " + $op + ": " + $k)}}'
+  else
+    jq -n --arg k "$rule_key" '{status: {ok: false, missing: [], message: ("failed to save routing rule: " + $k)}}'
+  fi
+  exit 0
+fi
 
 # Bounded snapshot of the PipeWire registry, captured once and reused for the
 # friendly-name map and (when pactl is absent) the device-only fallback. A
@@ -280,6 +344,9 @@ else
     '{ok: false, missing: $missing, message: $msg}')"
 fi
 
+# Persistent routing rules for the panel to display and enforce.
+load_rules
+
 final_payload="$(jq -n \
   --argjson streams "$streams" \
   --argjson sinks "$sinks_out" \
@@ -288,7 +355,8 @@ final_payload="$(jq -n \
   --argjson sources "$sources_out" \
   --arg defaultSource "$default_source" \
   --argjson status "$status_json" \
-  '{streams: $streams, sinks: $sinks, defaultSink: $defaultSink, inputStreams: $inputStreams, sources: $sources, defaultSource: $defaultSource, status: $status}')"
+  --argjson rules "$rules_json" \
+  '{streams: $streams, sinks: $sinks, defaultSink: $defaultSink, inputStreams: $inputStreams, sources: $sources, defaultSource: $defaultSource, rules: $rules, status: $status}')"
 
 # Fail closed if serialization still exceeds the payload cap.
 if (( ${#final_payload} > MAX_TOTAL_BYTES )); then

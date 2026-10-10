@@ -15,8 +15,23 @@ function parseAudioData(raw) {
     inputStreams: inputStreams,
     sources: sources,
     defaultSource: data.defaultSource || "",
+    rules: (data.rules && typeof data.rules === "object") ? data.rules : {},
     status: data.status || { ok: true, missing: [], message: "" }
   }
+}
+
+// Stable identity key for an application stream, used for persistent routing
+// rules. Prefers the process binary (survives restarts/PIDs), then the PipeWire
+// media name, then the advertised app name.
+function appKey(stream) {
+  if (!stream) return ""
+  var b = stream.appBinary || ""
+  if (b !== "") return "bin:" + b
+  var n = stream.mediaName || ""
+  if (n !== "") return "media:" + n
+  var a = stream.appName || ""
+  if (a !== "" && a !== "Unknown app") return "app:" + a
+  return ""
 }
 
 function volumePercent(stream) {
@@ -120,6 +135,7 @@ function defaultSourceGlyph(source, defaultSource) {
 if (typeof module !== "undefined") {
   module.exports = {
     parseAudioData: parseAudioData,
+    appKey: appKey,
     volumePercent: volumePercent,
     muted: muted,
     muteGlyph: muteGlyph,
